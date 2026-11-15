@@ -1,0 +1,221 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  LIBRARIAN
+  MEMBER
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum MemberStatus {
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+}
+
+enum CopyStatus {
+  AVAILABLE
+  ON_LOAN
+  RESERVED
+  LOST
+  MAINTENANCE
+}
+
+enum LoanStatus {
+  ACTIVE
+  RETURNED
+  LOST
+}
+
+enum FineStatus {
+  PENDING
+  PARTIAL
+  PAID
+  WAIVED
+}
+
+enum FineReason {
+  OVERDUE
+  LOST_ITEM
+  DAMAGE
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  ONLINE
+}
+
+enum ReservationStatus {
+  QUEUED
+  READY
+  FULFILLED
+  CANCELLED
+  EXPIRED
+}
+
+model User {
+  id               String        @id @default(uuid())
+  email            String        @unique @db.VarChar(200)
+  passwordHash     String
+  name             String
+  role             Role          @default(MEMBER)
+  status           UserStatus    @default(ACTIVE)
+  member           Member?
+  issuedLoans      Loan[]        @relation("LoanIssuer")
+  receivedPayments Payment[]     @relation("PaymentReceiver")
+  sessions         AuthSession[]
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@index([role])
+}
+
+model AuthSession {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String
+  ip        String?
+  userAgent String?  @db.Text
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Member {
+  id           String        @id @default(uuid())
+  userId       String        @unique
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  membershipNo String        @unique
+  phone        String?
+  address      String?       @db.Text
+  status       MemberStatus  @default(ACTIVE)
+  maxLoans     Int           @default(5)
+  expiresAt    DateTime?
+  joinedAt     DateTime      @default(now())
+  loans        Loan[]
+  fines        Fine[]
+  payments     Payment[]
+  reservations Reservation[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([status])
+}
+
+model BookCopy {
+  id           String        @id @default(uuid())
+  bookId       String
+  copyCode     String        @unique
+  status       CopyStatus    @default(AVAILABLE)
+  location     String?
+  condition    String?
+  loans        Loan[]
+  reservations Reservation[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([bookId, status])
+  @@index([status])
+}
+
+model Loan {
+  id           String     @id @default(uuid())
+  copyId       String
+  copy         BookCopy   @relation(fields: [copyId], references: [id])
+  bookId       String
+  memberId     String
+  member       Member     @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  issuedById   String
+  issuedBy     User       @relation("LoanIssuer", fields: [issuedById], references: [id])
+  checkedOutAt DateTime   @default(now())
+  dueAt        DateTime
+  returnedAt   DateTime?
+  renewedCount Int        @default(0)
+  status       LoanStatus @default(ACTIVE)
+  fineAmount   Int        @default(0)
+  fines        Fine[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([memberId, status])
+  @@index([bookId])
+  @@index([status, dueAt])
+  @@index([checkedOutAt])
+}
+
+model Fine {
+  id         String      @id @default(uuid())
+  loanId     String
+  loan       Loan        @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  memberId   String
+  member     Member      @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  amount     Int
+  paidAmount Int         @default(0)
+  reason     FineReason  @default(OVERDUE)
+  status     FineStatus  @default(PENDING)
+  note       String?       @db.Text
+  assessedAt DateTime    @default(now())
+  paidAt     DateTime?
+  payments   Payment[]
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  @@index([memberId, status])
+  @@index([status])
+  @@index([assessedAt])
+}
+
+model Payment {
+  id           String        @id @default(uuid())
+  fineId       String
+  fine         Fine          @relation(fields: [fineId], references: [id], onDelete: Cascade)
+  memberId     String
+  member       Member        @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  amount       Int
+  method       PaymentMethod
+  reference    String?
+  paidAt       DateTime      @default(now())
+  receivedById String
+  receivedBy   User          @relation("PaymentReceiver", fields: [receivedById], references: [id])
+  createdAt    DateTime      @default(now())
+
+  @@index([fineId])
+  @@index([memberId])
+  @@index([paidAt])
+}
+
+model Reservation {
+  id          String            @id @default(uuid())
+  bookId      String
+  memberId    String
+  member      Member            @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  copyId      String?
+  copy        BookCopy?         @relation(fields: [copyId], references: [id], onDelete: SetNull)
+  status      ReservationStatus @default(QUEUED)
+  readyAt     DateTime?
+  expiresAt   DateTime?
+  fulfilledAt DateTime?
+  cancelledAt DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([bookId, status, createdAt])
+  @@index([memberId, status])
+  @@index([status, expiresAt])
+  @@index([copyId])
+}
