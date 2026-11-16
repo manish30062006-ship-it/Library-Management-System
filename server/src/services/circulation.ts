@@ -127,7 +127,10 @@ export async function checkout(
           checkedOutAt: now,
           dueAt,
         },
-        include: { copy: { select: { copyCode: true } } },
+        include: {
+          copy: { select: { copyCode: true } },
+          issuedBy: { select: { name: true } },
+        },
       });
 
       if (reservationId) {
@@ -440,6 +443,7 @@ export async function listLoansForStaff(filters: LoanFilters) {
       take: filters.pageSize,
       include: {
         copy: { select: { copyCode: true } },
+        issuedBy: { select: { name: true } },
         member: {
           select: {
             id: true,
@@ -472,7 +476,10 @@ export async function listLoansForMember(
     where,
     orderBy: { checkedOutAt: 'desc' },
     take: 100,
-    include: { copy: { select: { copyCode: true } } },
+    include: {
+      copy: { select: { copyCode: true } },
+      issuedBy: { select: { name: true } },
+    },
   });
 
   return decorateLoans(rows);

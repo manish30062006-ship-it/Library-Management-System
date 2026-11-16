@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useDebounced } from '../lib/useDebounced';
-import { money, shortDate, titleCase } from '../lib/format';
+import { money, shortDate, stamp, titleCase } from '../lib/format';
 import {
   Badge,
   EmptyState,
@@ -479,6 +479,10 @@ export function Members() {
                           </Link>
                           <p className="text-[11px] text-stone-500">
                             {loan.copy?.copyCode ?? '—'} · due {shortDate(loan.dueAt)}
+                          </p>
+                          <p className="text-[10px] text-stone-400">
+                            Issued by {loan.issuedBy?.name ?? 'the desk'} ·{' '}
+                            {stamp(loan.checkedOutAt)}
                           </p>
                         </div>
                         {loan.overdue ? (

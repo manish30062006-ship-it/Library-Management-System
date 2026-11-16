@@ -9,7 +9,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import { api } from '../lib/api';
-import { daysFromNow, money, shortDate, titleCase } from '../lib/format';
+import { clockTime, daysFromNow, money, shortDate, stamp, titleCase } from '../lib/format';
 import { Cover } from '../components/Cover';
 import {
   Badge,
@@ -99,7 +99,14 @@ function LoanCard({ loan }: { loan: Loan }) {
           </div>
         </dl>
 
-        <p className="mt-3 text-[11px] text-stone-400">
+        <p className="mt-3 text-[11px] text-stone-500">
+          Issued by{' '}
+          <span className="font-medium text-stone-700">
+            {loan.issuedBy?.name ?? 'the circulation desk'}
+          </span>{' '}
+          · {stamp(loan.checkedOutAt)}
+        </p>
+        <p className="mt-1 text-[11px] text-stone-400">
           Issue, renewal and return are handled by the librarian at the circulation desk.
         </p>
       </div>
@@ -247,7 +254,7 @@ export function MyLibrary() {
                       {titleCase(fine.reason)}
                     </p>
                     <p className="text-xs text-stone-500">
-                      Assessed {shortDate(fine.assessedAt)}
+                      Assessed {stamp(fine.assessedAt)}
                       {fine.loan?.copy?.copyCode
                         ? ` · copy ${fine.loan.copy.copyCode}`
                         : ''}
@@ -296,7 +303,10 @@ export function MyLibrary() {
                         className="flex items-center justify-between py-1 text-xs text-stone-600"
                       >
                         <span>
-                          {shortDate(payment.paidAt)} · {titleCase(payment.method)}
+                          {stamp(payment.paidAt)} · {titleCase(payment.method)}
+                          {payment.receivedBy?.name
+                            ? ` · received by ${payment.receivedBy.name}`
+                            : ''}
                         </span>
                         <span className="font-medium">{money(payment.amount)}</span>
                       </div>
@@ -326,8 +336,9 @@ export function MyLibrary() {
                 <tr>
                   <th className={thClass}>Title</th>
                   <th className={thClass}>Copy</th>
-                  <th className={thClass}>Borrowed</th>
-                  <th className={thClass}>Returned</th>
+                  <th className={thClass}>Issued by</th>
+                  <th className={thClass}>Borrowed (IST)</th>
+                  <th className={thClass}>Returned (IST)</th>
                   <th className={thClass}>Fine</th>
                   <th className={thClass}>Status</th>
                 </tr>
@@ -344,8 +355,21 @@ export function MyLibrary() {
                       </Link>
                     </td>
                     <td className={tdClass}>{loan.copy?.copyCode ?? '—'}</td>
-                    <td className={tdClass}>{shortDate(loan.checkedOutAt)}</td>
-                    <td className={tdClass}>{shortDate(loan.returnedAt)}</td>
+                    <td className={`${tdClass} whitespace-nowrap`}>
+                      {loan.issuedBy?.name ?? '—'}
+                    </td>
+                    <td className={`${tdClass} whitespace-nowrap`}>
+                      {shortDate(loan.checkedOutAt)}
+                      <span className="mt-0.5 block text-[10px] text-stone-400">
+                        {clockTime(loan.checkedOutAt)} IST
+                      </span>
+                    </td>
+                    <td className={`${tdClass} whitespace-nowrap`}>
+                      {shortDate(loan.returnedAt)}
+                      <span className="mt-0.5 block text-[10px] text-stone-400">
+                        {clockTime(loan.returnedAt)} IST
+                      </span>
+                    </td>
                     <td className={tdClass}>
                       {loan.fineAmount > 0 ? money(loan.fineAmount) : '—'}
                     </td>

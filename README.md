@@ -30,7 +30,8 @@ React 19 · Vite · Tailwind CSS
   feed with unread counts (deduplicated per loan per day).
 - **Live dashboard** — activity feed of issues, returns, renewals, holds and
   fines with member and staff names plus timestamps, refreshing every 5 seconds;
-  KPI cards refresh every 10 seconds.
+  KPI cards refresh every 10 seconds. Every time in the UI is shown in Indian
+  Standard Time (IST) and the header carries a live IST clock.
 - **Reports** — KPIs, daily circulation and revenue, overdue aging, top titles,
   hold pipeline, audit trail.
 - **Ops** — single-command local stack, Docker Compose, health checks, seed data,

@@ -266,8 +266,15 @@ Indexes `{ userId: 1, createdAt: -1 }` and `{ userId: 1, readAt: 1 }`.
 
 `GET /api/reports/activity` reads the newest audit entries and joins them against
 loans, fines, reservations, and `User` documents to resolve member and staff
-names. The dashboard polls it every 5 seconds and KPI cards every 10 seconds, so
-issue/return/waive events appear with actor name and timestamp without a reload.
+names. The admin audit endpoint additionally resolves the member behind each
+audited loan/fine/reservation, so every row shows who the event was for as well
+as who performed it. The dashboard polls activity every 5 seconds and KPI cards
+every 10 seconds, so issue/return/waive events appear with actor name and
+timestamp without a reload.
+
+All timestamps are presented in **IST (Asia/Kolkata)** — the API formats activity
+labels in IST, the report day buckets are IST calendar days, and the SPA renders
+dates, times, and its live header clock in IST.
 
 ## 9. Concurrency: checkout and returns
 

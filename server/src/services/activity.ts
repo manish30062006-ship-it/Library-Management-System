@@ -16,10 +16,20 @@ export interface ActivityItem {
   createdAt: string;
 }
 
+const IST_TIME_ZONE = 'Asia/Kolkata';
+
+/** Compact IST stamp, e.g. "16 Nov, 10:42 pm IST". */
 function dateLabel(value: unknown): string {
   const date = value instanceof Date ? value : new Date(String(value));
   if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  const text = date.toLocaleString('en-IN', {
+    timeZone: IST_TIME_ZONE,
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+  return `${text} IST`;
 }
 
 const asRecord = (value: unknown): Record<string, unknown> =>

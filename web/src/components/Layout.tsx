@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   BarChart3,
@@ -5,6 +6,7 @@ import {
   BookMarked,
   BookOpen,
   BookPlus,
+  Clock3,
   LayoutDashboard,
   LibraryBig,
   LogOut,
@@ -14,7 +16,7 @@ import {
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
-import { initials } from '../lib/format';
+import { clockTimeFull, initials } from '../lib/format';
 import type { NotificationResponse, Role } from '../types';
 
 interface NavItem {
@@ -40,6 +42,28 @@ const ROLE_LABEL: Record<Role, string> = {
   LIBRARIAN: 'Librarian',
   MEMBER: 'Member',
 };
+
+function IstClock() {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return (
+    <div
+      className="flex items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-2.5 py-1.5"
+      title="Indian Standard Time — updates every second"
+    >
+      <Clock3 className="h-3.5 w-3.5 text-amber-600" />
+      <span className="text-[11px] font-semibold tabular-nums text-stone-700">
+        {clockTimeFull(now)}
+      </span>
+      <span className="text-[9px] font-bold uppercase tracking-wide text-stone-400">IST</span>
+    </div>
+  );
+}
 
 function titleFor(pathname: string): string {
   if (/^\/books\/[^/]+$/.test(pathname)) return 'Book details';
@@ -150,6 +174,7 @@ export function Layout() {
             </div>
 
             <div className="flex items-center gap-2">
+              <IstClock />
               <Link
                 to="/notifications"
                 className="relative rounded-xl border border-stone-200 bg-white p-2 text-stone-500 transition hover:text-stone-900"

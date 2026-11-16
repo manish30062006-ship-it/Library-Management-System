@@ -21,8 +21,16 @@ interface TopBookRow {
   loans: number;
 }
 
+const IST_TIME_ZONE = 'Asia/Kolkata';
+
+/** Calendar day in Indian Standard Time (YYYY-MM-DD), so charts bucket by IST days. */
 function dayKey(value: Date): string {
-  return value.toISOString().slice(0, 10);
+  return value.toLocaleDateString('en-CA', {
+    timeZone: IST_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
 }
 
 function countByDay(dates: Date[]): DayCount[] {

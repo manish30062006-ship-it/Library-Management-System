@@ -19,7 +19,15 @@ import {
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { dateTime, money, timeAgo, titleCase } from '../lib/format';
+import {
+  dateTime,
+  istDayKey,
+  istDayLabel,
+  money,
+  stamp,
+  timeAgo,
+  titleCase,
+} from '../lib/format';
 import { Cover } from '../components/Cover';
 import {
   Badge,
@@ -63,11 +71,7 @@ const activityTones: Record<ActivityItem['tone'], string> = {
 };
 
 function labelForDay(day?: string): string {
-  if (!day) return '';
-  return new Date(`${day}T00:00:00Z`).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-  });
+  return istDayLabel(day);
 }
 
 function fillSeries(
@@ -75,11 +79,13 @@ function fillSeries(
   rows: { day: string; value: number }[],
 ): { key: string; value: number }[] {
   const map = new Map(rows.map((row) => [row.day, row.value]));
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
+  const todayKey = istDayKey(new Date());
+  const [year, month, date] = todayKey.split('-').map(Number);
+  const anchor = Date.UTC(year, month - 1, date);
   return Array.from({ length: days }, (_, index) => {
-    const date = new Date(today.getTime() - (days - 1 - index) * 86_400_000);
-    const key = date.toISOString().slice(0, 10);
+    const key = new Date(anchor - (days - 1 - index) * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
     return { key, value: map.get(key) ?? 0 };
   });
 }
@@ -277,7 +283,7 @@ export function Reports() {
       <PageHeader
         eyebrow="Insight"
         title="Reports"
-        subtitle="Circulation, holds, revenue, and collection performance — live activity every 5 seconds, KPIs every 10."
+        subtitle="Circulation, holds, revenue, and collection performance — live activity every 5 seconds, KPIs every 10. All times in IST."
         actions={
           <>
             <div className="flex rounded-xl border border-stone-200 bg-white p-1">
@@ -392,8 +398,11 @@ export function Reports() {
                             .join(' · ') || '—'}
                         </p>
                       </div>
-                      <span className="shrink-0 pt-1 text-[11px] tabular-nums text-stone-400">
-                        {timeAgo(item.createdAt)}
+                      <span className="shrink-0 pt-1 text-right text-[11px] tabular-nums text-stone-400">
+                        <span className="block">{timeAgo(item.createdAt)}</span>
+                        <span className="mt-0.5 block whitespace-nowrap text-[10px] text-stone-400">
+                          {stamp(item.createdAt)}
+                        </span>
                       </span>
                     </li>
                   );
@@ -525,8 +534,9 @@ export function Reports() {
                   <table className={tableClass}>
                     <thead>
                       <tr>
-                        <th className={thClass}>When</th>
+                        <th className={thClass}>When (IST)</th>
                         <th className={thClass}>Action</th>
+                        <th className={thClass}>Member</th>
                         <th className={thClass}>Entity</th>
                         <th className={thClass}>By</th>
                       </tr>
@@ -541,6 +551,20 @@ export function Reports() {
                             <span className="font-mono text-xs text-stone-800">
                               {entry.action}
                             </span>
+                          </td>
+                          <td className={tdClass}>
+                            {entry.memberName ? (
+                              <>
+                                <p className="whitespace-nowrap text-xs font-medium text-stone-800">
+                                  {entry.memberName}
+                                </p>
+                                <p className="font-mono text-[10px] text-stone-400">
+                                  {entry.membershipNo ?? '—'}
+                                </p>
+                              </>
+                            ) : (
+                              <span className="text-xs text-stone-400">—</span>
+                            )}
                           </td>
                           <td className={tdClass}>
                             <span className="text-xs text-stone-600">

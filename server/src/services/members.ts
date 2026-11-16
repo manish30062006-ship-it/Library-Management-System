@@ -64,12 +64,17 @@ async function buildMemberDesk(member: MemberWithUser) {
       where: { memberId: member.id },
       orderBy: { checkedOutAt: 'desc' },
       take: 100,
-      include: { copy: { select: { copyCode: true } } },
+      include: {
+        copy: { select: { copyCode: true } },
+        issuedBy: { select: { name: true } },
+      },
     }),
     prisma.fine.findMany({
       where: { memberId: member.id },
       orderBy: { assessedAt: 'desc' },
-      include: { payments: true },
+      include: {
+        payments: { include: { receivedBy: { select: { name: true } } } },
+      },
     }),
     listMyReservations(member.id),
   ]);

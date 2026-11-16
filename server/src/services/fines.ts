@@ -27,7 +27,7 @@ export async function listFinesForMember(memberId: string) {
     where: { memberId },
     orderBy: { assessedAt: 'desc' },
     include: {
-      payments: true,
+      payments: { include: { receivedBy: { select: { name: true } } } },
       loan: {
         select: {
           id: true,
@@ -182,7 +182,7 @@ export async function listFinesForStaff(filters: {
             copy: { select: { copyCode: true } },
           },
         },
-        payments: true,
+        payments: { include: { receivedBy: { select: { name: true } } } },
       },
     }),
     prisma.fine.count({ where }),

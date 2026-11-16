@@ -69,6 +69,7 @@ export interface Payment {
   method: 'CASH' | 'CARD' | 'ONLINE';
   reference: string | null;
   paidAt: string;
+  receivedBy?: { name: string } | null;
 }
 
 export interface Loan {
@@ -83,6 +84,7 @@ export interface Loan {
   status: LoanStatus;
   fineAmount: number;
   copy?: { copyCode: string } | null;
+  issuedBy?: { name: string } | null;
   book: BookMeta | null;
   overdue: boolean;
   projectedFineCents: number;
@@ -278,6 +280,8 @@ export interface AuditEntry {
   actorId: string | null;
   actorName: string | null;
   actorRole: string | null;
+  memberName: string | null;
+  membershipNo: string | null;
   action: string;
   entityType: string;
   entityId: string | null;

@@ -15,7 +15,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useDebounced } from '../lib/useDebounced';
-import { dateTime, money, shortDate, titleCase } from '../lib/format';
+import { dateTime, money, shortDate, stamp, titleCase } from '../lib/format';
 import {
   Badge,
   EmptyState,
@@ -658,6 +658,10 @@ export function Circulation() {
                           <p className="text-[11px] text-stone-500">
                             {loan.member?.user.name ?? '—'} ·{' '}
                             {loan.copy?.copyCode ?? '—'}
+                          </p>
+                          <p className="text-[10px] text-stone-400">
+                            Issued by {loan.issuedBy?.name ?? 'the desk'} ·{' '}
+                            {stamp(loan.checkedOutAt)}
                           </p>
                         </td>
                         <td className={tdClass}>
