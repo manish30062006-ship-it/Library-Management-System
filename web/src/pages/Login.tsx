@@ -105,7 +105,7 @@ export function Login() {
           <div className="mt-10 grid gap-3">
             {[
               ['Search that reads your mind', 'MongoDB multi-field matching with live facets.'],
-              ['Circulation you can trust', 'MySQL transactions keep every copy accounted for.'],
+              ['Circulation you can trust', 'MongoDB transactions keep every copy accounted for.'],
               ['Clear for every member', 'Availability, issued titles, dates, and dues at a glance.'],
             ].map(([title, body]) => (
               <div
@@ -122,7 +122,7 @@ export function Login() {
           </div>
         </div>
 
-        <p className="relative text-[11px] text-stone-600">MySQL · MongoDB</p>
+        <p className="relative text-[11px] text-stone-600">MongoDB · Prisma</p>
       </section>
 
       <section className="flex items-center justify-center bg-stone-100 px-5 py-12">

@@ -2,7 +2,7 @@
   "name": "athenaeum-api",
   "version": "1.0.0",
   "private": true,
-  "description": "Library management API — MySQL + MongoDB",
+  "description": "Library management API — MongoDB (Prisma + Mongoose)",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "prisma generate && tsc -p tsconfig.json",

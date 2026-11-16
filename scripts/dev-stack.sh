@@ -7,12 +7,11 @@ ENV_FILE="$HOME_DIR/api.env"
 PIDS="$HOME_DIR/pids"
 LOGS="$HOME_DIR/logs"
 
-MYSQLD=/usr/local/mysql/bin/mysqld
-MYSQLADMIN=/usr/local/mysql/bin/mysqladmin
 MONGOD=/opt/homebrew/bin/mongod
+MONGOSH=/opt/homebrew/bin/mongosh
 
-MYSQL_PORT=3307
 MONGO_PORT=27018
+MONGO_REPLSET=rs0
 API_PORT=4000
 WEB_PORT=5173
 
@@ -30,25 +29,31 @@ wait_port() {
   return 1
 }
 
-start_mysql() {
-  if listening "$MYSQL_PORT"; then echo "• MySQL already on $MYSQL_PORT"; return; fi
-  "$MYSQLD" --basedir=/usr/local/mysql \
-    --datadir="$HOME_DIR/mysql" \
-    --port="$MYSQL_PORT" --bind-address=127.0.0.1 \
-    --socket="$HOME_DIR/mysql.sock" --mysqlx=OFF \
-    --pid-file="$PIDS/mysql.pid" --log-error="$LOGS/mysql.log" \
-    >/dev/null 2>&1 &
-  wait_port MySQL "$MYSQL_PORT"
-  echo "✔ MySQL on $MYSQL_PORT"
+ensure_replset() {
+  "$MONGOSH" --quiet --port "$MONGO_PORT" --eval '
+    if (db.hello().setName == null) {
+      try { rs.initiate({ _id: "rs0", members: [{ _id: 0, host: "127.0.0.1:27018" }] }); } catch (e) {}
+    }
+    for (let i = 0; i < 40; i++) {
+      if (db.hello().isWritablePrimary) quit(0);
+      sleep(500);
+    }
+    quit(1);
+  ' >/dev/null 2>&1
 }
 
 start_mongo() {
-  if listening "$MONGO_PORT"; then echo "• MongoDB already on $MONGO_PORT"; return; fi
+  if listening "$MONGO_PORT"; then
+    if ensure_replset; then echo "• MongoDB already on $MONGO_PORT (replica set $MONGO_REPLSET)"; return; fi
+    echo "✖ MongoDB on $MONGO_PORT is not a $MONGO_REPLSET primary — restart it: $0 stop && $0 start" >&2
+    return 1
+  fi
   nohup "$MONGOD" --dbpath "$HOME_DIR/mongo" --port "$MONGO_PORT" --bind_ip 127.0.0.1 \
-    >"$LOGS/mongod.log" 2>&1 &
+    --replSet "$MONGO_REPLSET" >"$LOGS/mongod.log" 2>&1 &
   echo $! >"$PIDS/mongod.pid"
   wait_port MongoDB "$MONGO_PORT"
-  echo "✔ MongoDB on $MONGO_PORT"
+  ensure_replset || echo "⚠ replica set init pending — check $LOGS/mongod.log" >&2
+  echo "✔ MongoDB on $MONGO_PORT (replica set $MONGO_REPLSET)"
 }
 
 start_api() {
@@ -88,11 +93,6 @@ stop_pid_file() {
 stop_all() {
   stop_pid_file "$PIDS/web.pid" Web
   stop_pid_file "$PIDS/api.pid" API
-  if listening "$MYSQL_PORT"; then
-    "$MYSQLADMIN" --socket="$HOME_DIR/mysql.sock" -uroot shutdown >/dev/null 2>&1 || true
-    echo "✔ MySQL stopped"
-  fi
-  stop_pid_file "$PIDS/mysql.pid" MySQL
   stop_pid_file "$PIDS/mongod.pid" MongoDB
   if listening "$MONGO_PORT"; then
     mongosh --quiet --port "$MONGO_PORT" --eval 'db.getSiblingDB("admin").shutdownServer()' >/dev/null 2>&1 \
@@ -102,7 +102,7 @@ stop_all() {
 }
 
 status() {
-  for pair in "MySQL:$MYSQL_PORT" "MongoDB:$MONGO_PORT" "API:$API_PORT" "Web:$WEB_PORT"; do
+  for pair in "MongoDB:$MONGO_PORT" "API:$API_PORT" "Web:$WEB_PORT"; do
     name="${pair%%:*}"; port="${pair##*:}"
     if listening "$port"; then echo "● $name  :$port up"; else echo "○ $name  :$port down"; fi
   done
@@ -111,7 +111,6 @@ status() {
 
 start_all() {
   start_mongo || true
-  start_mysql || true
   start_api "${1:-}" || true
   start_web || true
 }
@@ -121,7 +120,7 @@ supervise() {
   start_all
   while true; do
     sleep 10
-    for port in "$MONGO_PORT" "$MYSQL_PORT" "$API_PORT" "$WEB_PORT"; do
+    for port in "$MONGO_PORT" "$API_PORT" "$WEB_PORT"; do
       if ! listening "$port"; then
         echo "[$(date '+%F %T')] port $port down — restarting"
         start_all
@@ -132,11 +131,11 @@ supervise() {
 }
 
 case "${1:-start}" in
-  start)   start_mongo; start_mysql; start_api "${2:-}"; start_web; status ;;
+  start)   start_mongo; start_api "${2:-}"; start_web; status ;;
   supervise) supervise ;;
   stop)    stop_all; status ;;
-  restart) stop_all; sleep 1; start_mongo; start_mysql; start_api "${2:-}"; start_web; status ;;
+  restart) stop_all; sleep 1; start_mongo; start_api "${2:-}"; start_web; status ;;
   status)  status ;;
   logs)    tail -n "${3:-50}" "$LOGS/${2:-api}.log" ;;
-  *) echo "usage: $0 {start [--build]|stop|restart [--build]|status|logs <api|web|mysql|mongod|build> [lines]}" >&2; exit 1 ;;
+  *) echo "usage: $0 {start [--build]|stop|restart [--build]|status|logs <api|web|mongod|build> [lines]}" >&2; exit 1 ;;
 esac

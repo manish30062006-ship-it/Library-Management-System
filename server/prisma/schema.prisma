@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "mysql"
+  provider = "mongodb"
   url      = env("DATABASE_URL")
 }
 
@@ -66,8 +66,8 @@ enum ReservationStatus {
 }
 
 model User {
-  id               String        @id @default(uuid())
-  email            String        @unique @db.VarChar(200)
+  id               String        @id @default(uuid()) @map("_id")
+  email            String        @unique
   passwordHash     String
   name             String
   role             Role          @default(MEMBER)
@@ -83,12 +83,12 @@ model User {
 }
 
 model AuthSession {
-  id        String   @id @default(uuid())
+  id        String   @id @default(uuid()) @map("_id")
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   tokenHash String
   ip        String?
-  userAgent String?  @db.Text
+  userAgent String?
   expiresAt DateTime
   createdAt DateTime @default(now())
 
@@ -97,12 +97,12 @@ model AuthSession {
 }
 
 model Member {
-  id           String        @id @default(uuid())
+  id           String        @id @default(uuid()) @map("_id")
   userId       String        @unique
   user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   membershipNo String        @unique
   phone        String?
-  address      String?       @db.Text
+  address      String?
   status       MemberStatus  @default(ACTIVE)
   maxLoans     Int           @default(5)
   expiresAt    DateTime?
@@ -118,7 +118,7 @@ model Member {
 }
 
 model BookCopy {
-  id           String        @id @default(uuid())
+  id           String        @id @default(uuid()) @map("_id")
   bookId       String
   copyCode     String        @unique
   status       CopyStatus    @default(AVAILABLE)
@@ -134,7 +134,7 @@ model BookCopy {
 }
 
 model Loan {
-  id           String     @id @default(uuid())
+  id           String     @id @default(uuid()) @map("_id")
   copyId       String
   copy         BookCopy   @relation(fields: [copyId], references: [id])
   bookId       String
@@ -159,7 +159,7 @@ model Loan {
 }
 
 model Fine {
-  id         String      @id @default(uuid())
+  id         String      @id @default(uuid()) @map("_id")
   loanId     String
   loan       Loan        @relation(fields: [loanId], references: [id], onDelete: Cascade)
   memberId   String
@@ -168,7 +168,7 @@ model Fine {
   paidAmount Int         @default(0)
   reason     FineReason  @default(OVERDUE)
   status     FineStatus  @default(PENDING)
-  note       String?       @db.Text
+  note       String?
   assessedAt DateTime    @default(now())
   paidAt     DateTime?
   payments   Payment[]
@@ -181,7 +181,7 @@ model Fine {
 }
 
 model Payment {
-  id           String        @id @default(uuid())
+  id           String        @id @default(uuid()) @map("_id")
   fineId       String
   fine         Fine          @relation(fields: [fineId], references: [id], onDelete: Cascade)
   memberId     String
@@ -200,7 +200,7 @@ model Payment {
 }
 
 model Reservation {
-  id          String            @id @default(uuid())
+  id          String            @id @default(uuid()) @map("_id")
   bookId      String
   memberId    String
   member      Member            @relation(fields: [memberId], references: [id], onDelete: Cascade)

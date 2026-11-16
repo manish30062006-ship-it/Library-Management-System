@@ -26,7 +26,7 @@ async function waitFor(
 }
 
 async function main(): Promise<void> {
-  await waitFor('MySQL', () => prisma.$queryRaw`SELECT 1`);
+  await waitFor('MongoDB (Prisma)', () => prisma.user.count());
   await connectMongo();
 
   const app = createApp();

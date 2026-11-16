@@ -1,253 +1,191 @@
 # Athenaeum — Library Management System
 
-A full-stack, multi-database library management platform featuring catalog and search, physical inventory, circulation, fines and payments, reservations with pickup holds, notifications, and staff reporting.
+A full-stack library platform: catalog and search, physical inventory,
+circulation, fines and payments, reservations with pickup holds, notifications,
+and staff reporting — all persisted in a single MongoDB database.
 
-**Tech Stack:** Node.js 22 · TypeScript · Express · MySQL/Prisma · MongoDB · React 19 · Vite · Tailwind CSS
+**Stack:** Node.js 22 · TypeScript · Express · MongoDB · Prisma + Mongoose ·
+React 19 · Vite · Tailwind CSS
 
-Start with [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the system design and [docs/API.md](docs/API.md) for the endpoint reference.
+> Start with [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and
+> [docs/API.md](docs/API.md) for the endpoint reference.
 
 ## Features
 
-- **Authentication & Roles** — JWT access tokens, rotating refresh tokens in HttpOnly cookies, refresh sessions stored in MySQL (revocable), and Admin/Librarian/Member role-based access control.
-- **Catalog Management** — MongoDB book metadata and full-text search with subject, language, and publisher facets computed from the catalog.
-- **Circulation Management** — Copy-level checkout using MySQL conditional transitions, renewals, returns, and lost-item handling. Only authorized staff can issue, renew, or return books.
-- **Member Dashboard** — Members can view book availability, their issued books, issue and due dates, borrowing history, and outstanding dues. Members have no circulation write permissions.
-- **Fines & Payments** — ₹5 per started overdue day, per-loan fine cap, partial payments, waivers, and checkout blocking based on outstanding balances.
-- **Reservations** — Staff can place holds for members. Includes an ordered queue, 48-hour pickup holds, automatic promotion on return/cancellation/expiry, and copy reservation.
-- **Notifications** — Notifications for holds ready, due-soon reminders, overdue books, fines, and payments. Includes an in-app feed with unread counts and daily deduplication per loan in MongoDB.
-- **Reports & Analytics** — KPIs, daily circulation and revenue, overdue aging, top titles, hold pipeline, and audit trail.
-- **Operations** — Docker Compose configuration for MySQL and MongoDB, health checks, database initialization, graceful shutdown, and background scans.
+- **Auth & roles** — JWT access tokens, rotating refresh tokens in HttpOnly
+  cookies, refresh sessions stored in MongoDB (revocable), Admin/Librarian/Member
+  RBAC.
+- **Catalog** — MongoDB book metadata and full-text search with
+  subject/language/publisher facets computed from the catalog itself.
+- **Circulation** — copy-level checkout with guarded status transitions,
+  renewals, returns, lost-item handling. Staff only: members cannot issue,
+  renew, or return books themselves.
+- **Member view** — members see availability, which titles are issued to them
+  with issue/due dates, their history, and outstanding dues. No write actions.
+- **Fines** — ₹5/started overdue day, per-loan cap, partial payments, waivers,
+  outstanding-balance checkout blocking.
+- **Reservations** — staff place holds for members; ordered queue, 48-hour
+  pickup holds, automatic promotion on return/cancel/expiry, copy reservation.
+- **Notifications** — holds ready, due-soon, overdue, fines, payments; in-app
+  feed with unread counts (deduplicated per loan per day).
+- **Live dashboard** — activity feed of issues, returns, renewals, holds and
+  fines with member and staff names plus timestamps, refreshing every 5 seconds;
+  KPI cards refresh every 10 seconds.
+- **Reports** — KPIs, daily circulation and revenue, overdue aging, top titles,
+  hold pipeline, audit trail.
+- **Ops** — single-command local stack, Docker Compose, health checks, seed data,
+  graceful shutdown, background scans.
 
-## Quick Start (Docker)
-
-Clone the repository and navigate to the project directory.
+## Quick start (Docker)
 
 ```bash
 cp .env.example .env
 docker compose up --build
 ```
 
-Wait for the API health check to complete, then open:
+Compose starts MongoDB as a single-node replica set (`rs0`), initiates it once,
+then boots the API and web app. Wait for the API health check, then open
+**http://localhost:5173**.
 
-**http://localhost:5173**
-
-The API can initialize the database with optional seed data (`SEED_ON_START=true`).
-
-To initialize the database manually:
+The API seeds itself on first boot (`SEED_ON_START=true`). To seed manually:
 
 ```bash
 docker compose exec api node dist/scripts/seed.js
 ```
 
-## Local Development (Without Containerizing the Application)
+## Local development (without containerizing the app)
 
-Start the database infrastructure only:
+MongoDB must run as a replica set — Prisma uses transactions for circulation:
 
 ```bash
-docker compose up -d mysql mongo
+docker compose up -d mongo mongo-init
 ```
 
-### Backend Setup
+API:
 
 ```bash
 cd server
-cp ../.env.example .env
-```
-
-Configure `DATABASE_URL`, `MONGO_URL`, and other required environment variables for localhost.
-
-Install dependencies and initialize the database:
-
-```bash
+cp ../.env.example .env        # set DATABASE_URL / MONGO_URL for localhost
 npm install
-npm run db:push
+npm run db:push                # sync Prisma schema
 npm run seed
-npm run dev
+npm run dev                    # http://localhost:4000
 ```
 
-Backend API:
-
-**http://localhost:4000**
-
-### Frontend Setup
-
-Open another terminal:
+Web:
 
 ```bash
 cd web
 npm install
-npm run dev
+npm run dev                    # http://localhost:5173, proxies /api → :4000
 ```
 
-Frontend:
+No cache or search service is required: catalog cache, rate limits, and search
+all run from MongoDB and the API process.
 
-**http://localhost:5173**
+### Local stack script (no Docker)
 
-The frontend development server proxies `/api` requests to the backend on port 4000.
+`scripts/dev-stack.sh` runs MongoDB on 27018 as replica set `rs0`, the API on
+4000 and Vite on 5173, keeping data, env and logs under `~/.athenaeum-dev` so a
+reboot does not wipe them:
 
-No external cache or search service is required. Sessions, catalog cache, rate limits, and full-text search run using MySQL and MongoDB.
+```bash
+scripts/dev-stack.sh start          # add --build to rebuild the API first
+scripts/dev-stack.sh status
+scripts/dev-stack.sh logs api 80
+scripts/dev-stack.sh stop
+```
 
-## Project Structure
+`scripts/dev-stack.sh supervise` adds a watchdog that restarts any service that
+dies. A 500 on sign-in usually means port 4000 is down — the Vite proxy answers
+500 when it cannot reach the API. Run `status` first.
 
-```text
+## Project layout
+
+```
 .
 ├── docker-compose.yml
 ├── .env.example
 ├── docs/
-│   ├── ARCHITECTURE.md
+│   ├── ARCHITECTURE.md        # data ownership, models, locks, queues, failure modes
 │   └── API.md
 ├── server/
-│   ├── prisma/
-│   │   └── schema.prisma
+│   ├── prisma/schema.prisma   # ledger models on MongoDB
 │   ├── Dockerfile
 │   └── src/
-│       ├── config/
-│       ├── lib/
-│       ├── middleware/
-│       ├── models/
-│       ├── services/
-│       ├── routes/
-│       ├── jobs/
-│       │   └── scheduler.ts
-│       └── scripts/
-│           └── seed.ts
+│       ├── config/            # zod-validated env
+│       ├── lib/               # Prisma/Mongo clients, errors, time
+│       ├── middleware/        # auth, RBAC, rate limiting, errors
+│       ├── models/            # Mongoose: books, reviews, audit, notifications
+│       ├── services/          # circulation, fines, holds, search, reports
+│       ├── routes/            # HTTP layer
+│       ├── jobs/scheduler.ts  # due-soon, overdue, hold expiry
+│       └── scripts/seed.ts
 └── web/
     ├── Dockerfile
     ├── nginx.conf
     └── src/
-        ├── lib/
+        ├── lib/               # API client, auth context
         ├── components/
-        └── pages/
+        └── pages/             # catalog, book, member desk, circulation, reports
 ```
-
-### Backend Directories
-
-- `config/` — Environment configuration and validation using Zod.
-- `lib/` — Prisma and MongoDB clients, error handling, and time utilities.
-- `middleware/` — Authentication, RBAC, rate limiting, and error handling.
-- `models/` — Mongoose models for books, reviews, audit logs, and notifications.
-- `services/` — Circulation, fines, reservations, search, and reporting logic.
-- `routes/` — HTTP API endpoints.
-- `jobs/` — Background scheduler for due-soon reminders, overdue notifications, and hold expiry.
-- `scripts/` — Database initialization and seed scripts.
-
-### Frontend Directories
-
-- `lib/` — API client and authentication context.
-- `components/` — Reusable UI components.
-- `pages/` — Catalog, book details, member dashboard, circulation, and reports.
 
 ## Configuration
 
-Environment variables are validated at application startup in `server/src/config/env.ts`.
+Environment is validated at boot in `server/src/config/env.ts`. Defaults:
 
-| Variable | Default | Description |
-|---|---|---|
-| `PORT` | 4000 | Backend API port |
-| `JWT_ACCESS_SECRET` | Development value | Access token secret |
-| `JWT_REFRESH_SECRET` | Development value | Refresh token secret |
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `PORT` | 4000 | API port |
+| `DATABASE_URL` | — | Prisma MongoDB URL (same database as `MONGO_URL`) |
+| `MONGO_URL` | — | Mongoose MongoDB URL |
+| `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` | dev values | **Change in production** |
 | `ACCESS_TOKEN_TTL_SECONDS` | 900 | Access token lifetime |
-| `REFRESH_TOKEN_TTL_DAYS` | 7 | Refresh token lifetime |
-| `LOAN_PERIOD_DAYS` | 30 | Initial borrowing period |
-| `RENEWAL_DAYS` | 7 | Renewal extension period |
-| `MAX_RENEWALS` | 1 | Maximum renewals per loan |
-| `MAX_ACTIVE_LOANS` | 5 | Maximum active loans per member |
-| `MAX_ACTIVE_HOLDS` | 3 | Maximum active reservations per member |
-| `FINE_PER_DAY_CENTS` | 500 | Overdue fine rate (₹5/day) |
-| `MAX_FINE_CENTS` | 15000 | Maximum fine per loan (₹150) |
-| `MAX_OUTSTANDING_FINE_CENTS` | 10000 | Checkout blocking threshold (₹100) |
-| `RESERVATION_HOLD_HOURS` | 48 | Reservation pickup window |
-| `LOST_FEE_CENTS` | 25000 | Lost book replacement fee (₹250) |
-| `SEED_ON_START` | true (Compose) | Initialize database with seed data |
+| `REFRESH_TOKEN_TTL_DAYS` | 7 | Refresh lifetime |
+| `LOAN_PERIOD_DAYS` | 30 | Initial issue period |
+| `RENEWAL_DAYS` / `MAX_RENEWALS` | 7 / 1 | Renewal policy |
+| `MAX_ACTIVE_LOANS` | 5 | Per member |
+| `MAX_ACTIVE_HOLDS` | 3 | Per member |
+| `FINE_PER_DAY_CENTS` | 500 | Overdue rate (paise, ₹5/day) |
+| `MAX_FINE_CENTS` | 15000 | Per-loan cap (₹150) |
+| `MAX_OUTSTANDING_FINE_CENTS` | 10000 | Checkout block threshold (₹100) |
+| `RESERVATION_HOLD_HOURS` | 48 | Pickup window |
+| `LOST_FEE_CENTS` | 25000 | Replacement fee (₹250) |
+| `SEED_ON_START` | true (compose) | Idempotent demo seed |
 
-**Important:** Change development JWT secrets before deploying to production.
+## How the pieces work together
 
-## How the System Works
-
-### 1. Book Search
-
-Book searches run against MongoDB. Subject, language, and publisher facets are aggregated from the same collection.
-
-Book availability is retrieved from MySQL at query time. Search results are cached in process for 30 seconds.
-
-### 2. Book Checkout
-
-The checkout process resolves the member and physical book copy.
-
-Inside a MySQL transaction, the system conditionally changes the copy status:
-
-`AVAILABLE → ON_LOAN`
-
-A loan record is then inserted. The conditional update acts as the authoritative double-checkout protection mechanism.
-
-Only authorized staff can issue, renew, return, or mark books as lost.
-
-### 3. Book Return
-
-When a book is returned, the system calculates applicable fines in paise and records the payment obligation.
-
-The returned copy is either released as available or assigned to the oldest queued reservation.
-
-If a reservation is assigned, its status becomes `READY` and a 48-hour pickup period begins.
-
-### 4. Reservation Management
-
-Reservations are maintained in an ordered queue in MySQL.
-
-When a book is returned, cancelled, or a pickup hold expires, the system transactionally promotes the next eligible reservation.
-
-### 5. Background Operations
-
-Audit records, notifications, and cache invalidation run after database commits.
-
-These operations are best-effort and do not interfere with the main circulation transaction.
-
-Audit and notification records are stored in MongoDB.
+1. **Search** runs against the `books` collection; subject, language, and
+   publisher facets are aggregated from the same collection. Availability comes
+   from `BookCopy` at query time and results are cached in process for 30 seconds.
+2. **Checkout** resolves the member and copy, then inside a Prisma transaction
+   flips `AVAILABLE → ON_LOAN` with a guarded `updateMany` and inserts the loan.
+   The affected-row count is the authoritative double-checkout guard. Only staff
+   can issue, renew, return, or mark items lost.
+3. **Return** computes the fine in paise, records it, then either releases the
+   copy or assigns it to the oldest queued reservation and marks that hold
+   `READY` with a 48-hour expiry.
+4. **Reservations** are queued in the `Reservation` collection and placed by
+   staff, then promoted transactionally on return/cancel/expiry.
+5. **Side effects** (audit, notifications, cache invalidation) run after commit
+   and are best-effort. The live activity endpoint joins the audit stream with
+   loans, fines, and users to show who did what, to whom, and when.
 
 ## Verification
 
-Run backend checks:
-
 ```bash
-cd server
-npm run typecheck
-npm run build
+cd server && npm run typecheck && npm run build
+cd web && npm run typecheck && npm run build
 ```
 
-Run frontend checks:
+The build is type-checked in this workspace. The runtime stack needs MongoDB
+running as a replica set, either through `docker compose` or locally.
 
-```bash
-cd web
-npm run typecheck
-npm run build
-```
+## Production notes
 
-The application requires Docker with MySQL and MongoDB, or locally installed instances of both databases.
-
-## Production Considerations
-
-This project is a reference implementation and is not yet hardened for production deployment.
-
-Before production use:
-
-1. Rotate all development secrets.
-2. Enable HTTPS/TLS.
-3. Add CSRF protection for cookie-based endpoints.
-4. Replace the in-process job scheduler with a dedicated queue worker.
-5. Introduce a transactional outbox for reliable background operations.
-6. Use Prisma migrations instead of `db push`.
-7. Add idempotency keys to checkout and payment operations.
-8. Configure production database credentials and access permissions.
-9. Implement appropriate monitoring, logging, and backup policies.
-
-For additional technical details, refer to:
-
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#16-production-hardening-roadmap)
-
-[docs/API.md](docs/API.md)
-
----
-
-**Athenaeum — Library Management System**
-
-A full-stack library platform built with Node.js, TypeScript, React, MySQL, Prisma, and MongoDB.
+This is a reference implementation, not a hardened deployment. Before production:
+rotate secrets, use TLS, add CSRF protection for cookie endpoints, replace the
+in-process job scheduler with a queue worker, introduce a transactional outbox,
+add idempotency keys to checkout/payment, and run MongoDB as a multi-node replica
+set. The full list lives in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#16-production-hardening-roadmap).

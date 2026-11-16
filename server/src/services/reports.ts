@@ -21,8 +21,24 @@ interface TopBookRow {
   loans: number;
 }
 
+function dayKey(value: Date): string {
+  return value.toISOString().slice(0, 10);
+}
+
+function countByDay(dates: Date[]): DayCount[] {
+  const map = new Map<string, number>();
+  for (const date of dates) {
+    const key = dayKey(date);
+    map.set(key, (map.get(key) ?? 0) + 1);
+  }
+  return [...map.entries()]
+    .map(([day, count]) => ({ day, count }))
+    .sort((a, b) => a.day.localeCompare(b.day));
+}
+
 export async function dashboard(days: number) {
   const since = new Date(Date.now() - days * 86_400_000);
+  const now = new Date();
 
   const [
     members,
@@ -31,71 +47,90 @@ export async function dashboard(days: number) {
     overdueLoans,
     readyHolds,
     queuedHolds,
-    outstandingRow,
-    collectedRow,
-    circulationByDay,
-    revenueByDay,
-    overdueAging,
-    topBookRows,
+    openFines,
+    collectedPayments,
+    recentLoans,
+    recentPayments,
+    overdueRows,
+    topLoanRows,
     fineStatus,
   ] = await Promise.all([
     prisma.member.count(),
     prisma.member.count({ where: { status: 'ACTIVE' } }),
     prisma.loan.count({ where: { status: 'ACTIVE' } }),
-    prisma.loan.count({ where: { status: 'ACTIVE', dueAt: { lt: new Date() } } }),
+    prisma.loan.count({ where: { status: 'ACTIVE', dueAt: { lt: now } } }),
     prisma.reservation.count({ where: { status: 'READY' } }),
     prisma.reservation.count({ where: { status: 'QUEUED' } }),
-    prisma.$queryRaw<Array<{ outstanding: number }>>`
-      SELECT CAST(COALESCE(SUM(amount - paidAmount), 0) AS SIGNED) AS outstanding
-      FROM \`Fine\`
-      WHERE status IN ('PENDING', 'PARTIAL')
-    `,
-    prisma.$queryRaw<Array<{ collected: number }>>`
-      SELECT CAST(COALESCE(SUM(amount), 0) AS SIGNED) AS collected
-      FROM \`Payment\`
-      WHERE \`paidAt\` >= ${since}
-    `,
-    prisma.$queryRaw<DayCount[]>`
-      SELECT DATE_FORMAT(\`checkedOutAt\`, '%Y-%m-%d') AS day,
-             CAST(COUNT(*) AS SIGNED) AS count
-      FROM \`Loan\`
-      WHERE \`checkedOutAt\` >= ${since}
-      GROUP BY day
-      ORDER BY day
-    `,
-    prisma.$queryRaw<DayCents[]>`
-      SELECT DATE_FORMAT(\`paidAt\`, '%Y-%m-%d') AS day,
-             CAST(COALESCE(SUM(amount), 0) AS SIGNED) AS cents
-      FROM \`Payment\`
-      WHERE \`paidAt\` >= ${since}
-      GROUP BY day
-      ORDER BY day
-    `,
-    prisma.$queryRaw<BucketCount[]>`
-      SELECT CASE
-               WHEN TIMESTAMPDIFF(DAY, \`dueAt\`, UTC_TIMESTAMP()) < 7 THEN '1-7 days'
-               WHEN TIMESTAMPDIFF(DAY, \`dueAt\`, UTC_TIMESTAMP()) < 30 THEN '8-30 days'
-               ELSE '31+ days'
-             END AS bucket,
-             CAST(COUNT(*) AS SIGNED) AS count
-      FROM \`Loan\`
-      WHERE status = 'ACTIVE' AND \`dueAt\` < UTC_TIMESTAMP()
-      GROUP BY bucket
-    `,
-    prisma.$queryRaw<TopBookRow[]>`
-      SELECT \`bookId\`, CAST(COUNT(*) AS SIGNED) AS loans
-      FROM \`Loan\`
-      WHERE \`checkedOutAt\` >= ${since}
-      GROUP BY \`bookId\`
-      ORDER BY loans DESC
-      LIMIT 8
-    `,
+    prisma.fine.findMany({
+      where: { status: { in: ['PENDING', 'PARTIAL'] } },
+      select: { amount: true, paidAmount: true },
+    }),
+    prisma.payment.findMany({
+      where: { paidAt: { gte: since } },
+      select: { amount: true, paidAt: true },
+    }),
+    prisma.loan.findMany({
+      where: { checkedOutAt: { gte: since } },
+      select: { checkedOutAt: true, bookId: true },
+    }),
+    prisma.payment.findMany({
+      where: { paidAt: { gte: since } },
+      select: { paidAt: true, amount: true },
+    }),
+    prisma.loan.findMany({
+      where: { status: 'ACTIVE', dueAt: { lt: now } },
+      select: { dueAt: true },
+    }),
+    prisma.loan.findMany({
+      where: { checkedOutAt: { gte: since } },
+      select: { bookId: true },
+    }),
     prisma.fine.groupBy({
       by: ['status'],
       _count: { _all: true },
       _sum: { amount: true, paidAmount: true },
     }),
   ]);
+
+  const outstandingFineCents = openFines.reduce(
+    (sum, fine) => sum + fine.amount - fine.paidAmount,
+    0,
+  );
+  const collectedFineCents = collectedPayments.reduce((sum, payment) => sum + payment.amount, 0);
+
+  const circulationByDay: DayCount[] = countByDay(recentLoans.map((loan) => loan.checkedOutAt));
+
+  const revenueMap = new Map<string, number>();
+  for (const payment of recentPayments) {
+    const key = dayKey(payment.paidAt);
+    revenueMap.set(key, (revenueMap.get(key) ?? 0) + payment.amount);
+  }
+  const revenueByDay: DayCents[] = [...revenueMap.entries()]
+    .map(([day, cents]) => ({ day, cents }))
+    .sort((a, b) => a.day.localeCompare(b.day));
+
+  const buckets = new Map<string, number>([
+    ['1-7 days', 0],
+    ['8-30 days', 0],
+    ['31+ days', 0],
+  ]);
+  for (const { dueAt } of overdueRows) {
+    const daysLate = Math.max(0, Math.floor((now.getTime() - dueAt.getTime()) / 86_400_000));
+    const bucket = daysLate < 7 ? '1-7 days' : daysLate < 30 ? '8-30 days' : '31+ days';
+    buckets.set(bucket, (buckets.get(bucket) ?? 0) + 1);
+  }
+  const overdueAging: BucketCount[] = [...buckets.entries()]
+    .filter(([, count]) => count > 0)
+    .map(([bucket, count]) => ({ bucket, count }));
+
+  const loanCounts = new Map<string, number>();
+  for (const { bookId } of topLoanRows) {
+    loanCounts.set(bookId, (loanCounts.get(bookId) ?? 0) + 1);
+  }
+  const topBookRows: TopBookRow[] = [...loanCounts.entries()]
+    .map(([bookId, loans]) => ({ bookId, loans }))
+    .sort((a, b) => b.loans - a.loans)
+    .slice(0, 8);
 
   const metas = await bookMetaMap(topBookRows.map((row) => row.bookId));
 
@@ -109,21 +144,15 @@ export async function dashboard(days: number) {
       overdueLoans,
       readyHolds,
       queuedHolds,
-      outstandingFineCents: Number(outstandingRow[0]?.outstanding ?? 0),
-      collectedFineCents: Number(collectedRow[0]?.collected ?? 0),
+      outstandingFineCents,
+      collectedFineCents,
     },
-    circulationByDay: circulationByDay.map((row) => ({
-      day: row.day,
-      count: Number(row.count),
-    })),
-    revenueByDay: revenueByDay.map((row) => ({ day: row.day, cents: Number(row.cents) })),
-    overdueAging: overdueAging.map((row) => ({
-      bucket: row.bucket,
-      count: Number(row.count),
-    })),
+    circulationByDay,
+    revenueByDay,
+    overdueAging,
     topBooks: topBookRows.map((row) => ({
       bookId: row.bookId,
-      loans: Number(row.loans),
+      loans: row.loans,
       book: metas.get(row.bookId) ?? null,
     })),
     finesByStatus: fineStatus.map((row) => ({

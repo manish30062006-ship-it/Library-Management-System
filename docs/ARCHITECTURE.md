@@ -21,13 +21,17 @@ seams for all three.
 | --- | --- |
 | API | Node.js 22, TypeScript, Express 4 |
 | Frontend | React 19, Vite, TypeScript, React Router, TanStack Query, Tailwind CSS |
-| Relational store | MySQL 9 + Prisma ORM |
-| Document store | MongoDB 7 + Mongoose |
-| Packaging | Docker Compose |
+| Data store | MongoDB 7+ — one database for every collection |
+| ORM / ODM | Prisma (ledger collections) + Mongoose (catalog, reviews, audit, notifications) |
+| Packaging | Docker Compose (optional) or `scripts/dev-stack.sh` |
 
 The API deliberately has **no external cache, lock, or search service**. Catalog
-and search run directly on MongoDB; sessions, cache, rate limits, and
-short-lived locks are kept inside the API process.
+and search run directly on MongoDB; cache, rate limits, and short-lived locks are
+kept inside the API process.
+
+MongoDB must run as a **replica set** (a single-node `rs0` is enough locally):
+Prisma's MongoDB connector uses multi-document transactions for checkout,
+returns, and payments.
 
 ## 3. System context
 
@@ -44,60 +48,60 @@ short-lived locks are kept inside the API process.
                        +--------------v--------------+
                        |        Express API          |
                        |  routes → services → data   |
-                       +--------+-------------+------+
-                                |             |
-                                v             v
-                        +--------------+  +-----------+
-                        | MySQL        |  |  MongoDB  |
-                        | identity     |  | catalog   |
-                        | inventory    |  | reviews   |
-                        | circulation  |  | audit     |
-                        | money        |  | notifs    |
-                        | sessions     |  | search    |
-                        +--------------+  +-----------+
+                       +--------------+--------------+
+                                      |
+                       +--------------v--------------+
+                       |          MongoDB            |
+                       |  identity · inventory       |
+                       |  circulation · money        |
+                       |  sessions · catalog         |
+                       |  reviews · audit · notifs   |
+                       +-----------------------------+
 ```
 
 ## 4. Data ownership (the important rule)
 
-Every fact has exactly one **system of record**. Other stores hold derived or
-event data and may be rebuilt.
+Everything lives in one database, but each collection still has exactly one
+owner and one access path.
 
-| Data | System of record | Why |
-| --- | --- | --- |
-| Users, roles, credentials | MySQL | Constraints, joins, transactional updates |
-| Members, membership state | MySQL | Lifecycle tied to circulation |
-| Book metadata, subjects, descriptions | MongoDB | Flexible, document-shaped content |
-| Physical copies, copy status | MySQL | Circulation needs ACID and row-level guards |
-| Loans, renewals | MySQL | Money and inventory correctness |
-| Fines, payments, waivers | MySQL | Integer paise (INR), auditability, reporting |
-| Reservations / hold queue | MySQL | Ordering + transactional copy assignment |
-| Reviews | MongoDB | User-generated content, flexible shape |
-| Audit log | MongoDB | Append-only event stream, TTL retention |
-| Notifications | MongoDB | Per-user event feed |
-| Refresh sessions | MySQL (`AuthSession`) | Revocable, survives restarts |
-| Catalog cache, rate limits, copy locks | API process memory | Ephemeral by design |
+| Data | Collection | Access | Why |
+| --- | --- | --- | --- |
+| Users, roles, credentials | `User` | Prisma | Unique email, role checks |
+| Members, membership state | `Member` | Prisma | Lifecycle tied to circulation |
+| Refresh sessions | `AuthSession` | Prisma | Revocable, survives restarts |
+| Physical copies, copy status | `BookCopy` | Prisma | Circulation needs guarded status transitions |
+| Loans, renewals | `Loan` | Prisma | Money and inventory correctness |
+| Fines, payments, waivers | `Fine`, `Payment` | Prisma | Integer paise (INR), auditability |
+| Reservations / hold queue | `Reservation` | Prisma | Ordering + transactional copy assignment |
+| Book metadata, subjects, descriptions | `books` | Mongoose | Flexible, document-shaped content |
+| Reviews | `reviews` | Mongoose | User-generated content |
+| Audit log | `auditlogs` | Mongoose | Append-only stream, TTL retention |
+| Notifications | `notifications` | Mongoose | Per-user event feed |
+| Catalog cache, rate limits, copy locks | API process memory | — | Ephemeral by design |
 
-**`bookId` is a MongoDB ObjectId stored as a string in MySQL.** Referential
-integrity between stores is enforced by application code because no distributed
-transaction spans Mongo and MySQL. Consequences:
+**`bookId` is a MongoDB ObjectId stored as a string.** The `books` collection is
+written through Mongoose while copies and loans go through Prisma, so the link is
+enforced by application code, not by a foreign key.
 
-- A loan can never exist without a valid copy; copies are in MySQL.
-- A copy can reference a book that was archived; copying is blocked if active
-  loans exist, and archived books are removed from search.
-- Book metadata enrichment for loan/report responses is a second Mongo query
-  keyed by `bookId`.
+Consequences:
 
-### Cross-store consistency strategy
+- A loan can never exist without a valid copy; copies are Prisma-managed.
+- A copy can reference a book that was archived; archiving is blocked while
+  active loans exist, and archived books disappear from search.
+- Book metadata enrichment for loan/report responses is a second query keyed by
+  `bookId`.
 
-MySQL is authoritative. A circulation transaction commits **first**, then
-best-effort side effects run (cache invalidation, audit log, notification). A
-side-effect failure never rolls back a committed loan; it is logged and
-recoverable.
+### Consistency strategy
 
-- Search needs no rebuild step: queries run directly against MongoDB `books`,
-  so a metadata write is immediately searchable.
+Prisma transactions cover the ledger: copy status, loan, fine, payment, and
+reservation promotion commit together or not at all. Side effects (cache
+invalidation, audit log, notification) run after the commit and are best-effort.
+A side-effect failure never rolls back a committed loan; it is logged and can be
+replayed from the audit stream.
+
+- Search needs no rebuild step: queries run directly against `books`.
 - Audit/notification loss is acceptable for this reference build; production
-  hardening is a transactional outbox in MySQL consumed by a worker.
+  hardening is a transactional outbox consumed by a worker.
 
 ## 5. Backend layout
 
@@ -116,7 +120,7 @@ server/src
 ```
 
 Routes are thin. All rules that affect money, inventory, or queue ordering live
-in services and execute inside MySQL transactions when they mutate state.
+in services and execute inside Prisma transactions when they mutate state.
 
 ## 6. Authentication and authorization
 
@@ -124,11 +128,11 @@ in services and execute inside MySQL transactions when they mutate state.
 Sent as `Authorization: Bearer …`; the SPA keeps it in memory only.
 
 **Refresh token**: JWT, 7 days, `type: "refresh"`, `jti`, delivered as an
-`HttpOnly; SameSite=Lax; Path=/api/auth` cookie. A row in MySQL `AuthSession`
-stores the SHA-256 hash of the token keyed by `jti`, which makes it revocable.
-Every refresh **rotates**: the old session row is deleted and a new one created
-in the same transaction before a new token pair is issued. Logout deletes the
-row and clears the cookie.
+`HttpOnly; SameSite=Lax; Path=/api/auth` cookie. A document in the `AuthSession`
+collection stores the SHA-256 hash of the token keyed by `jti`, which makes it
+revocable. Every refresh **rotates**: the old session document is deleted and a
+new one created in the same transaction before a new token pair is issued.
+Logout deletes the document and clears the cookie.
 
 **Roles**
 
@@ -147,9 +151,10 @@ Other controls: bcrypt cost 12, Helmet, strict CORS with credentials, Zod
 validation on every body/query, in-process fixed-window rate limits on auth and
 write endpoints, request-body size cap, and no secrets in logs.
 
-## 7. MySQL schema (ERD)
+## 7. Ledger collections (Prisma)
 
-All primary keys are UUIDs. Money is stored as **integer paise** (INR minor units).
+All primary keys are UUID strings stored in `_id`. Money is stored as **integer
+paise** (INR minor units).
 
 ```
 User 1───0..1 Member 1───* Loan *───1 BookCopy
@@ -159,9 +164,13 @@ User 1───0..1 Member 1───* Loan *───1 BookCopy
  ├──(issued loans / received payments)
 └──* AuthSession (refresh-token hashes)
 
-BookCopy.bookId ── references MongoDB books._id (string, app-enforced)
+BookCopy.bookId ── references books._id (string, app-enforced)
 Loan.bookId     ── denormalized for reporting and hold lookup
 ```
+
+Relations are emulated by Prisma Client: the relation value (`userId`, `copyId`,
+`memberId`, …) is stored on the document and `include` performs the lookup. There
+are no database-level foreign keys, so deletes cascade only through Prisma.
 
 Enums:
 
@@ -179,20 +188,20 @@ ReservationStatus QUEUED | READY | FULFILLED | CANCELLED | EXPIRED
 
 Key invariants:
 
-- A copy has at most one active loan (enforced by the status transition, not a
-  partial unique index; see §9).
+- A copy has at most one active loan (enforced by the guarded status transition,
+  see §9).
 - `Loan.dueAt` is fixed at checkout; renewals extend it.
 - A fine’s `amount` is immutable after assessment. `paidAmount` moves toward it.
   `status` is derived on each payment (`PARTIAL` / `PAID`).
 - Reservations are ordered by `createdAt` within a book. `READY` reservations
   own exactly one `copyId`, which is `RESERVED` in inventory.
-- Deleting users/members cascades their loans/fines in the ORM schema for
+- Deleting users/members cascades their loans/fines through Prisma for
   development convenience; production would use soft deletes and retention.
 
 See [`server/prisma/schema.prisma`](../server/prisma/schema.prisma) for the
-authoritative DDL-level definition, indexes, and relations.
+authoritative model definition and indexes.
 
-## 8. MongoDB collections
+## 8. MongoDB collections (Mongoose)
 
 ### `books`
 
@@ -219,7 +228,7 @@ authoritative DDL-level definition, indexes, and relations.
 ```
 
 Indexes: `{ isbn: 1 }` unique, `{ subjects: 1 }`, `{ status: 1, createdAt: -1 }`.
-Copy counts are **not** stored here; they are always read from MySQL.
+Copy counts are **not** stored here; they are always read from `BookCopy`.
 
 ### `reviews`
 
@@ -233,15 +242,16 @@ Unique `{ bookId: 1, userId: 1 }` (one review per member per book). Index
 `{ bookId: 1, createdAt: -1 }`. Review writes recompute `ratingAvg`/`ratingCount`
 on the book.
 
-### `audit_logs`
+### `auditlogs`
 
 ```js
 { _id, actorId, actorRole, action, entityType, entityId, before, after,
   ip, createdAt }
 ```
 
-Append-only. TTL index on `createdAt` (180 days). Used by Admin audit view.
-Written after successful commits and never allowed to fail the request.
+Append-only. TTL index on `createdAt` (180 days). Used by Admin audit view and by
+the live activity feed. Written after successful commits and never allowed to
+fail the request.
 
 ### `notifications`
 
@@ -252,6 +262,13 @@ Written after successful commits and never allowed to fail the request.
 
 Indexes `{ userId: 1, createdAt: -1 }` and `{ userId: 1, readAt: 1 }`.
 
+### Live activity
+
+`GET /api/reports/activity` reads the newest audit entries and joins them against
+loans, fines, reservations, and `User` documents to resolve member and staff
+names. The dashboard polls it every 5 seconds and KPI cards every 10 seconds, so
+issue/return/waive events appear with actor name and timestamp without a reload.
+
 ## 9. Concurrency: checkout and returns
 
 Two mechanisms, intentionally redundant:
@@ -259,17 +276,20 @@ Two mechanisms, intentionally redundant:
 1. **In-process copy lock** (`lock:copy:{copyId}` in a `Map` with a 10-second
    TTL). This serializes checkout/return per physical copy inside one API
    process and produces a friendly "item is busy" 409 under contention.
-2. **Conditional status transition inside a MySQL transaction**:
+2. **Guarded status transition inside a Prisma transaction**:
 
-   ```sql
-   UPDATE BookCopy SET status = 'ON_LOAN'
-   WHERE id = ? AND status = 'AVAILABLE';
+   ```ts
+   const claim = await tx.bookCopy.updateMany({
+     where: { id: copyId, status: 'AVAILABLE' },
+     data: { status: 'ON_LOAN' },
+   });
+   if (claim.count === 0) throw conflict('Copy is no longer available');
    ```
 
-   If `count = 0`, the operation aborts with 409. This is the real correctness
-   guard: two checkouts cannot both succeed regardless of the in-process lock.
-   Because the guard is the database row itself, running multiple API replicas
-   stays safe; the in-memory lock simply stops duplicate work.
+   If `count = 0`, the operation aborts. This is the real correctness guard: two
+   checkouts cannot both succeed regardless of the in-process lock. Because the
+   guard is the document itself, running multiple API replicas stays safe; the
+   in-memory lock simply stops duplicate work.
 
 Return does the reverse (`ON_LOAN → AVAILABLE`), then the same transaction
 assigns the copy to the next `QUEUED` reservation, marks it `READY`, and sets a
@@ -337,7 +357,8 @@ The API keeps three small `Map`-based stores with TTLs:
 
 Book writes delete the detail key and every `catalog:search:v1:*` key. Rate-limit
 windows and locks are per process; with multiple replicas each process enforces
-its own window, while MySQL conditional updates remain the authoritative guard.
+its own window, while guarded copy updates remain the authoritative concurrency
+control.
 
 Notification dedupe (one overdue/due-soon notice per loan per day) uses a unique
 MongoDB `dedupeKey` index instead of a cache key.
@@ -357,10 +378,9 @@ plus `ACTIVE` status), so refining by a facet never hides the other buckets:
 | `languages` | `$group` by `language`, top 10 |
 | `publishers` | `$group` by `publisher`, top 10 |
 
-Availability is enriched from MySQL for the current page only, so inventory is
-always fresh. Results are cached in process for 30 seconds and invalidated on
-book writes. There is no separate index to rebuild: `POST /api/books/reindex`
-no longer exists.
+Availability is enriched from `BookCopy` for the current page only, so inventory
+is always fresh. Results are cached in process for 30 seconds and invalidated on
+book writes. There is no separate index to rebuild.
 
 ## 13. Background jobs
 
@@ -375,32 +395,33 @@ Jobs are idempotent and never throw into the process loop.
 
 ## 14. Reporting
 
-All monetary and circulation reporting comes from MySQL aggregates:
-daily loans, daily fine revenue, outstanding balance, overdue counts and aging
-buckets, top-borrowed titles, and hold pipeline. Mongo supplies titles for the
-top-books list. Reports are staff-only and computed on demand; at larger scale,
-materialize daily rollups.
+Reporting reads the ledger collections through Prisma and folds the rows in
+process: daily loans, daily fine revenue, outstanding balance, overdue counts and
+aging buckets, top-borrowed titles, and hold pipeline. Mongo supplies titles for
+the top-books list. Reports are staff-only and computed on demand; at larger
+scale, materialize daily rollups or move the aggregation into a `$group`
+pipeline.
 
 ## 15. Failure modes
 
 | Failure | Behavior |
 | --- | --- |
-| Mongo down | Catalog/search/audit/notifications unavailable; circulation endpoints that enrich titles fail at read time, but committed MySQL state remains correct |
-| API crash mid-request | MySQL transaction rolls back; in-process locks/cache die with the process; side effects are at-least-once only after commit |
-| Duplicate checkout | Second conditional update matches zero rows → 409 |
+| MongoDB down | Whole API is unavailable — one store, no partial mode. Health check fails fast at startup |
+| Mongo running without a replica set | Prisma writes fail with `P2031`; start `mongod --replSet rs0` and run `rs.initiate()` once |
+| API crash mid-request | Prisma transaction rolls back; in-process locks/cache die with the process; side effects are at-least-once only after commit |
+| Duplicate checkout | Second guarded update matches zero documents → 409 |
 | Stale catalog cache | 30–60 s TTL; book writes invalidate immediately |
 
 ## 16. Production hardening roadmap
 
 1. Transactional outbox for notifications and audit.
-2. MySQL row-level `SELECT … FOR UPDATE` for multi-copy allocation and
-   serializable retry policy.
+2. Multi-node replica set with majority write concern and retryable writes.
 3. Idempotency keys on checkout/payment endpoints.
 4. httpOnly refresh cookies already implemented; add CSRF double-submit for
    cookie-bearing endpoints and a strict CSP at the edge.
 5. Replace in-process jobs with a durable queue or a dedicated worker.
 6. Real email/SMS provider behind the existing notification interface.
-7. Read replica for reports; materialized daily rollups.
+7. Read preference for reports; materialized daily rollups.
 8. Soft deletes and retention policies for members and financial records.
 9. MongoDB text index (or an external engine) if catalog search outgrows regex.
 10. Payment gateway with webhook reconciliation instead of manual payment entry.
