@@ -58,16 +58,18 @@ start_api() {
       echo "✖ server build failed — see $LOGS/build.log" >&2; return 1; }
     echo "✔ server built"
   fi
-  (cd "$ROOT/server" && nohup node --env-file="$ENV_FILE" dist/index.js >"$LOGS/api.log" 2>&1 &
-   echo $! >"$PIDS/api.pid")
+  (cd "$ROOT/server" && exec node --env-file="$ENV_FILE" dist/index.js) \
+    >"$LOGS/api.log" 2>&1 </dev/null &
+  echo $! >"$PIDS/api.pid"
   wait_port API "$API_PORT"
   echo "✔ API on $API_PORT"
 }
 
 start_web() {
   if listening "$WEB_PORT"; then echo "• Web already on $WEB_PORT"; return; fi
-  (cd "$ROOT/web" && nohup npx vite --port "$WEB_PORT" --strictPort >"$LOGS/web.log" 2>&1 &
-   echo $! >"$PIDS/web.pid")
+  (cd "$ROOT/web" && exec ./node_modules/.bin/vite --port "$WEB_PORT" --strictPort) \
+    >"$LOGS/web.log" 2>&1 </dev/null &
+  echo $! >"$PIDS/web.pid"
   wait_port Web "$WEB_PORT"
   echo "✔ Web on $WEB_PORT"
 }
