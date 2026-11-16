@@ -276,6 +276,7 @@ export interface ActivityResponse {
 export interface AuditEntry {
   _id: string;
   actorId: string | null;
+  actorName: string | null;
   actorRole: string | null;
   action: string;
   entityType: string;

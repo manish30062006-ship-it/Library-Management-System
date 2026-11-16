@@ -296,10 +296,12 @@ export function Circulation() {
         },
       }),
     onSuccess: (loan) => {
+      const borrower =
+        loan.member?.user.name ?? lookup.data?.member.user.name ?? 'the member';
       setCheckoutNotice(
-        `Issued “${loan.book?.title ?? loan.copy?.copyCode ?? 'copy'}” — due ${shortDate(
-          loan.dueAt,
-        )}.`,
+        `Issued “${loan.book?.title ?? loan.copy?.copyCode ?? 'copy'}” to ${
+          borrower
+        } — due ${shortDate(loan.dueAt)}.`,
       );
       setSelectedBook(null);
       setBookQuery('');
@@ -314,9 +316,15 @@ export function Circulation() {
   >({
     mutationFn: (input) =>
       api<ReturnResult>('/loans/return', { method: 'POST', body: input }),
-    onSuccess: (result) => {
+    onSuccess: (result, variables) => {
+      const borrower = variables.loanId
+        ? recentLoans.data?.items.find((item) => item.id === variables.loanId)?.member?.user
+            .name
+        : undefined;
       const parts = [
-        `Returned “${result.loan.book?.title ?? result.loan.copy?.copyCode ?? 'copy'}”.`,
+        `Returned “${result.loan.book?.title ?? result.loan.copy?.copyCode ?? 'copy'}”${
+          borrower ? ` from ${borrower}` : ''
+        }.`,
       ];
       parts.push(
         result.fineCents > 0

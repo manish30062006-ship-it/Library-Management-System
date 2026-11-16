@@ -384,7 +384,12 @@ export function Reports() {
                       <div className="min-w-0 flex-1">
                         <p className="text-sm leading-snug text-stone-800">{item.message}</p>
                         <p className="mt-0.5 text-[11px] text-stone-500">
-                          {[item.actor, item.detail].filter(Boolean).join(' · ') || '—'}
+                          {[
+                            item.actor ? `By ${item.actor}` : 'By system',
+                            item.detail,
+                          ]
+                            .filter(Boolean)
+                            .join(' · ') || '—'}
                         </p>
                       </div>
                       <span className="shrink-0 pt-1 text-[11px] tabular-nums text-stone-400">
@@ -523,7 +528,7 @@ export function Reports() {
                         <th className={thClass}>When</th>
                         <th className={thClass}>Action</th>
                         <th className={thClass}>Entity</th>
-                        <th className={thClass}>Actor role</th>
+                        <th className={thClass}>By</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -548,6 +553,9 @@ export function Reports() {
                             </span>
                           </td>
                           <td className={tdClass}>
+                            <p className="text-xs font-medium text-stone-800">
+                              {entry.actorName ?? 'System'}
+                            </p>
                             <Badge tone="stone">{entry.actorRole ?? 'SYSTEM'}</Badge>
                           </td>
                         </tr>
