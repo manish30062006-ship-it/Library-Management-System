@@ -4,6 +4,7 @@ import { asyncHandler, getPage, parseQuery } from '../lib/http';
 import { requireAuth, requireRole } from '../middleware/auth';
 import { dashboard } from '../services/reports';
 import { listAudit } from '../services/audit';
+import { recentActivity } from '../services/activity';
 
 export const reportsRouter = Router();
 
@@ -18,6 +19,13 @@ reportsRouter.get(
   asyncHandler(async (req, res) => {
     const query = parseQuery(dashboardSchema, req.query);
     res.json(await dashboard(query.days));
+  }),
+);
+
+reportsRouter.get(
+  '/activity',
+  asyncHandler(async (_req, res) => {
+    res.json(await recentActivity(20));
   }),
 );
 

@@ -257,6 +257,22 @@ export interface ReportData {
   }[];
 }
 
+export interface ActivityItem {
+  id: string;
+  action: string;
+  actor: string;
+  actorRole: string | null;
+  message: string;
+  detail: string | null;
+  tone: 'green' | 'amber' | 'red' | 'blue' | 'stone' | 'violet';
+  createdAt: string;
+}
+
+export interface ActivityResponse {
+  items: ActivityItem[];
+  generatedAt: string;
+}
+
 export interface AuditEntry {
   _id: string;
   actorId: string | null;

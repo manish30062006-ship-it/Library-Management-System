@@ -3,17 +3,23 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   AlertTriangle,
+  Archive,
   BookMarked,
   BookOpen,
+  Layers,
+  Pencil,
+  PlusCircle,
   RefreshCw,
+  RotateCcw,
   TrendingUp,
+  UserPlus,
   Users,
   Wallet,
   type LucideIcon,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { dateTime, money, titleCase } from '../lib/format';
+import { dateTime, money, timeAgo, titleCase } from '../lib/format';
 import { Cover } from '../components/Cover';
 import {
   Badge,
@@ -27,7 +33,34 @@ import {
   tdClass,
   thClass,
 } from '../components/ui';
-import type { AuditResponse, ReportData } from '../types';
+import type { ActivityItem, ActivityResponse, AuditResponse, ReportData } from '../types';
+
+const activityIcons: Record<string, LucideIcon> = {
+  'loan.checkout': BookOpen,
+  'loan.return': RotateCcw,
+  'loan.renew': RefreshCw,
+  'loan.lost': AlertTriangle,
+  'fine.payment': Wallet,
+  'fine.waive': Wallet,
+  'member.create': UserPlus,
+  'auth.register': UserPlus,
+  'member.update': Users,
+  'reservation.create': BookMarked,
+  'reservation.cancel': BookMarked,
+  'book.create': PlusCircle,
+  'book.update': Pencil,
+  'book.archive': Archive,
+  'copy.create': Layers,
+};
+
+const activityTones: Record<ActivityItem['tone'], string> = {
+  green: 'bg-emerald-50 text-emerald-700',
+  amber: 'bg-amber-50 text-amber-700',
+  red: 'bg-rose-50 text-rose-700',
+  blue: 'bg-sky-50 text-sky-700',
+  stone: 'bg-stone-100 text-stone-600',
+  violet: 'bg-violet-50 text-violet-700',
+};
 
 function labelForDay(day?: string): string {
   if (!day) return '';
@@ -213,12 +246,20 @@ export function Reports() {
   const report = useQuery({
     queryKey: ['reports', 'dashboard', days],
     queryFn: () => api<ReportData>(`/reports/dashboard?days=${days}`),
+    refetchInterval: 10_000,
+  });
+
+  const activity = useQuery({
+    queryKey: ['reports', 'activity'],
+    queryFn: () => api<ActivityResponse>('/reports/activity'),
+    refetchInterval: 5_000,
   });
 
   const audit = useQuery({
     queryKey: ['reports', 'audit'],
     queryFn: () => api<AuditResponse>('/reports/audit?pageSize=12'),
     enabled: isAdmin,
+    refetchInterval: 10_000,
   });
 
   const data = report.data;
@@ -236,7 +277,7 @@ export function Reports() {
       <PageHeader
         eyebrow="Insight"
         title="Reports"
-        subtitle="Circulation, holds, revenue, and collection performance — refreshed from MySQL on each load."
+        subtitle="Circulation, holds, revenue, and collection performance — live activity every 5 seconds, KPIs every 10."
         actions={
           <>
             <div className="flex rounded-xl border border-stone-200 bg-white p-1">
@@ -259,6 +300,7 @@ export function Reports() {
               type="button"
               onClick={() => {
                 report.refetch();
+                activity.refetch();
                 if (isAdmin) audit.refetch();
               }}
               disabled={report.isFetching}
@@ -306,6 +348,58 @@ export function Reports() {
               detail={`${data.kpis.activeMembers} active`}
             />
           </div>
+
+          <Section
+            title="Live activity"
+            action={
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                </span>
+                Live · 5s
+              </span>
+            }
+          >
+            {activity.isLoading ? (
+              <Spinner label="Warming up the desk…" />
+            ) : activity.isError ? (
+              <ErrorNote error={activity.error} />
+            ) : activity.data?.items.length ? (
+              <ul className="divide-y divide-stone-100">
+                {activity.data.items.map((item) => {
+                  const Icon = activityIcons[item.action] ?? BookOpen;
+                  return (
+                    <li
+                      key={item.id}
+                      className="flex items-start gap-3 py-2.5 first:pt-0 last:pb-0"
+                    >
+                      <span
+                        className={`mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full ${
+                          activityTones[item.tone]
+                        }`}
+                      >
+                        <Icon className="h-4 w-4" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm leading-snug text-stone-800">{item.message}</p>
+                        <p className="mt-0.5 text-[11px] text-stone-500">
+                          {[item.actor, item.detail].filter(Boolean).join(' · ') || '—'}
+                        </p>
+                      </div>
+                      <span className="shrink-0 pt-1 text-[11px] tabular-nums text-stone-400">
+                        {timeAgo(item.createdAt)}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="text-sm text-stone-400">
+                No activity yet — issue a book or add a member and it will appear here.
+              </p>
+            )}
+          </Section>
 
           <div className="grid gap-5 lg:grid-cols-2">
             <Section title="Issues">

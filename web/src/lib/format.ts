@@ -27,6 +27,17 @@ export function dateTime(value?: string | null): string {
   });
 }
 
+export function timeAgo(value?: string | null): string {
+  if (!value) return '—';
+  const diff = Date.now() - new Date(value).getTime();
+  if (diff < 45_000) return 'just now';
+  const minutes = Math.floor(diff / 60_000);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return shortDate(value);
+}
+
 export function initials(name: string): string {
   return name
     .split(' ')
